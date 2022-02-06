@@ -1,13 +1,13 @@
-from multiprocessing import context
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from enum import Enum
 import io
 import os
 import sys
+import shlex
 import subprocess
 
-from .arguments import compile_arguments
+from .arguments import default_convert
 
 
 class ParenthesisKind(Enum):
@@ -16,8 +16,15 @@ class ParenthesisKind(Enum):
     COMPOUND_ONLY = 3
 
 
+ShalchemyArgument = Union[
+    str,
+    'ShalchemyExpression',
+    'ReadSubstitute',
+    'WriteSubstitute',
+]
+
 ShalchemyExpression = Union[
-    'ShellCommand',
+    'CommandExpression',
     'PipeExpression',
     'RedirectInExpression',
     'RedirectOutExpression',
@@ -35,7 +42,7 @@ ShalchemyOutputStream = Union[
 
 
 def is_shalchemy_expression(object: Any) -> bool:
-    if isinstance(object, ShellCommand):
+    if isinstance(object, CommandExpression):
         return True
     if isinstance(object, PipeExpression):
         return True
@@ -58,9 +65,34 @@ def represent_file(file: Union[str, io.IOBase]):
     if isinstance(file, io.TextIOWrapper):
         return f'File({repr(file.name)})'
     elif isinstance(file, str):
-        return f'ImplicitFile({repr(file)})'
+        return shlex.quote(file)
     else:
         return repr(file)
+
+
+def flatten(stuff: Any):
+    if not isinstance(stuff, (list, tuple)):
+        return stuff
+    flattened = []
+    for x in stuff:
+        if isinstance(x, (list, tuple)):
+            flattened.extend(flatten(x))
+        else:
+            flattened.append(x)
+    return flattened
+
+
+def compile_arguments(
+    args: List['ShalchemyArgument'],
+    kwargs: Dict[str, 'ShalchemyArgument'],
+    _kwarg_converter: Callable[[str, 'ShalchemyArgument'], str] = default_convert
+) -> List[Any]:
+    result = []
+    for arg in flatten(args):
+        result.append(arg)
+    for key, value in kwargs.items():
+        result.append(_kwarg_converter(key, value))
+    return result
 
 
 class RunResult:
@@ -154,16 +186,38 @@ class ShalchemyBase:
         raise NotImplementedError()
 
 
-class ShellCommand(ShalchemyBase):
-    _args: List[Any]
-    _kwargs: Dict[Any, Any]
+class CommandExpression(ShalchemyBase):
+    _args: List[ShalchemyArgument]
+    _kwarg_converter: Callable[[str, ShalchemyArgument], str]
 
-    def __init__(self, *args: List[Any], **kwargs: Dict[Any, Any]):
+    def __init__(
+        self,
+        *args: List[ShalchemyArgument],
+        _kwarg_converter: Callable[[str, ShalchemyArgument], str] = default_convert,
+    ):
         self._args = args
-        self._kwargs = kwargs
+        self._kwarg_converter = _kwarg_converter
 
     def __call__(self, *args, **kwargs):
-        return ShellCommand(*(*self._args, *args), **{**self._kwargs, **kwargs})
+        if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], str):
+            return CommandExpression(
+                *self._args,
+                *shlex.split(args[0]),
+                _kwarg_converter=self._kwarg_converter,
+            )
+
+        compiled = compile_arguments(
+            args,
+            kwargs,
+            _kwarg_converter=self._kwarg_converter,
+        )
+
+        return CommandExpression(
+            *self._args,
+            *compiled,
+            _kwarg_converter=self._kwarg_converter,
+            **kwargs,
+        )
 
     def __getattr__(self, attr):
         if attr in self.__dict__:
@@ -176,9 +230,8 @@ class ShellCommand(ShalchemyBase):
         stdout: ShalchemyOutputStream,
         stderr: ShalchemyOutputStream,
     ) -> RunResult:
-        compiled = compile_arguments(self._args, self._kwargs)
         process = subprocess.Popen(
-            compiled,
+            self._args,
             stdin=stdin,
             stdout=stdout,
             stderr=stderr,
@@ -190,11 +243,16 @@ class ShellCommand(ShalchemyBase):
         )
 
     def _repr(self, paren: ParenthesisKind):
-        compiled = compile_arguments(self._args, self._kwargs)
-        return str(compiled)
+        result = []
+        for arg in self._args:
+            if isinstance(arg, str):
+                result.append(shlex.quote(arg))
+            else:
+                result.append(arg._repr())
+        return ' '.join(result)
 
     def __repr__(self):
-        return f'$({self._repr(ParenthesisKind.ALWAYS_PAREN)})'
+        return f'$({self._repr(ParenthesisKind.NEVER)})'
 
 
 class PipeExpression(ShalchemyBase):
@@ -276,7 +334,7 @@ class RedirectInExpression(ShalchemyBase):
         )
 
     def _repr(self, paren: ParenthesisKind):
-        return f'{repr(self.lhs, ParenthesisKind.COMPOUND_ONLY)} < {represent_file(self.rhs)}'
+        return f'{self.lhs._repr(ParenthesisKind.COMPOUND_ONLY)} < {represent_file(self.rhs)}'
 
     def __repr__(self):
         return f'$({self._repr(ParenthesisKind.NEVER)})'
@@ -347,7 +405,7 @@ class RedirectOutExpression(ShalchemyBase):
         else:
             op = '>'
 
-        return f'{repr(self.lhs, ParenthesisKind.COMPOUND_ONLY)} {op} {represent_file(self.rhs)}'
+        return f'{self.lhs._repr(ParenthesisKind.COMPOUND_ONLY)} {op} {represent_file(self.rhs)}'
 
     def __repr__(self):
         return f'$({self._repr(ParenthesisKind.NEVER)})'
@@ -385,7 +443,28 @@ class WriteSubstitute(ShalchemyBase):
         return self._repr(paren=ParenthesisKind.ALWAYS)
 
 
-sh = ShellCommand
+def sh(
+    *args,
+    _kwarg_converter: Callable[[str, ShalchemyArgument], str] = None,
+    **kwargs,
+):
+    if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], str):
+        return CommandExpression(
+            *shlex.split(args[0]),
+            _kwarg_converter=_kwarg_converter,
+        )
+
+    compiled = compile_arguments(
+        args,
+        kwargs,
+        _kwarg_converter=_kwarg_converter,
+    )
+
+    return CommandExpression(
+        *compiled,
+        _kwarg_converter=_kwarg_converter,
+        **kwargs,
+    )
 
 
 def run(

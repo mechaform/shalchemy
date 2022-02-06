@@ -1,8 +1,9 @@
+import os
 import shalchemy as sha
-from shalchemy import sh
-
+from shalchemy import sh, bin
 # There's a "smart" automatic command finder! It'll search your $PATH for you
-from shalchemy.bin import cat, echo, grep, sort
+from shalchemy.bin import cat, echo, grep, sort, mkdir
+
 
 my_words = '''
 zebra
@@ -19,7 +20,7 @@ elephant
 
 # This is equivalent to:
 # echo $MY_WORDS | sort > words.txt
-sha.run(echo(my_words) | sort > 'words.txt')
+sha.run(echo([my_words]) | sort > 'words.txt')
 
 # You can iterate over the result of an expression and it'll split by newlines
 for word in cat('words.txt'):
@@ -39,6 +40,11 @@ with open('animals.txt', 'w+') as file:
     sha.run(sort < file)
 
 sha.run(sh('rm', 'animals.txt'))
+
+sha.run(mkdir('hello'))
+
+os.chdir('hello')
+sha.run(bin.pwd)
 
 # '''
 # curl website.com | sort > sorted.txt
