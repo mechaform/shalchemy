@@ -1,4 +1,6 @@
-from typing import Any, Callable, Dict, List, Optional, Union
+from math import comb
+import tempfile
+from typing import Any, Callable, List, Union
 
 from enum import Enum
 import io
@@ -7,7 +9,8 @@ import sys
 import shlex
 import subprocess
 
-from .arguments import default_convert
+from .arguments import compile_arguments
+from .run_result import RunResult
 
 
 class ParenthesisKind(Enum):
@@ -70,53 +73,6 @@ def represent_file(file: Union[str, io.IOBase]):
         return repr(file)
 
 
-def flatten(stuff: Any):
-    if not isinstance(stuff, (list, tuple)):
-        return stuff
-    flattened = []
-    for x in stuff:
-        if isinstance(x, (list, tuple)):
-            flattened.extend(flatten(x))
-        else:
-            flattened.append(x)
-    return flattened
-
-
-def compile_arguments(
-    args: List['ShalchemyArgument'],
-    kwargs: Dict[str, 'ShalchemyArgument'],
-    _kwarg_converter: Callable[[str, 'ShalchemyArgument'], str] = default_convert
-) -> List[Any]:
-    result = []
-    for arg in flatten(args):
-        result.append(arg)
-    for key, value in kwargs.items():
-        result.append(_kwarg_converter(key, value))
-    return result
-
-
-class RunResult:
-    main: subprocess.Popen
-    processes: List[subprocess.Popen]
-    files: List[io.IOBase]
-
-    def __init__(
-        self,
-        main: subprocess.Popen,
-        processes: Optional[List[subprocess.Popen]] = None,
-        files: Optional[List[io.IOBase]] = None,
-    ):
-        self.main = main
-        self.processes = processes or []
-        self.files = files or []
-
-    def wait(self):
-        for process in self.processes:
-            process.wait()
-        for file in self.files:
-            file.close()
-
-
 class ShalchemyBase:
     def read_sub(self) -> 'ReadSubstitute':
         return ReadSubstitute(self)
@@ -141,38 +97,31 @@ class ShalchemyBase:
     def __gt__(self, rhs):
         return RedirectOutExpression(self, rhs)
 
+    def in_(self, rhs):
+        return RedirectInExpression(self, rhs)
+
+    def out(self, rhs):
+        return RedirectOutExpression(self, rhs)
+
     def __bool__(self):
-        result = self._run(
-            stdin=sys.stdin,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-        )
+        from .runner import _internal_run
+        result = _internal_run(self)
         result.wait()
         return result.main.returncode == 0
 
+    def __int__(self):
+        return int(str(self))
+
     def __str__(self):
-        read, write = os.pipe()
-        with os.fdopen(write) as write_pipe:
-            result = self._run(
-                stdin=sys.stdin,
-                stdout=write_pipe,
-                stderr=sys.stderr,
-            )
-            result.wait()
-        with os.fdopen(read) as read_pipe:
-            return read_pipe.read().rstrip('\n')
+        from .runner import _internal_run
+        result = _internal_run(self, stdout=subprocess.PIPE)
+        answer = result.main.stdout.read().decode()
+        result.main.wait()
+
+        return answer
 
     def __iter__(self):
-        read, write = os.pipe()
-        with os.fdopen(write) as write_pipe:
-            result = self._run(
-                stdin=sys.stdin,
-                stdout=write_pipe,
-                stderr=sys.stderr,
-            )
-            result.wait()
-        with os.fdopen(read) as read_pipe:
-            return read_pipe.read().rstrip('\n').split('\n').__iter__()
+        return str(self).rstrip('\n').split('\n').__iter__()
 
     def _run(
         self,
@@ -188,35 +137,34 @@ class ShalchemyBase:
 
 class CommandExpression(ShalchemyBase):
     _args: List[ShalchemyArgument]
-    _kwarg_converter: Callable[[str, ShalchemyArgument], str]
+    _kwarg_convert: Callable[[str, ShalchemyArgument], str]
 
     def __init__(
         self,
         *args: List[ShalchemyArgument],
-        _kwarg_converter: Callable[[str, ShalchemyArgument], str] = default_convert,
+        **kwargs: Any,
     ):
         self._args = args
-        self._kwarg_converter = _kwarg_converter
+        self._kwarg_convert = kwargs.pop('_kwarg_convert')
 
     def __call__(self, *args, **kwargs):
         if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], str):
             return CommandExpression(
                 *self._args,
                 *shlex.split(args[0]),
-                _kwarg_converter=self._kwarg_converter,
+                _kwarg_convert=self._kwarg_convert,
             )
 
         compiled = compile_arguments(
             args,
             kwargs,
-            _kwarg_converter=self._kwarg_converter,
+            _kwarg_convert=self._kwarg_convert,
         )
 
         return CommandExpression(
             *self._args,
             *compiled,
-            _kwarg_converter=self._kwarg_converter,
-            **kwargs,
+            _kwarg_convert=self._kwarg_convert,
         )
 
     def __getattr__(self, attr):
@@ -441,42 +389,3 @@ class WriteSubstitute(ShalchemyBase):
 
     def __repr__(self, paren: ParenthesisKind = None):
         return self._repr(paren=ParenthesisKind.ALWAYS)
-
-
-def sh(
-    *args,
-    _kwarg_converter: Callable[[str, ShalchemyArgument], str] = None,
-    **kwargs,
-):
-    if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], str):
-        return CommandExpression(
-            *shlex.split(args[0]),
-            _kwarg_converter=_kwarg_converter,
-        )
-
-    compiled = compile_arguments(
-        args,
-        kwargs,
-        _kwarg_converter=_kwarg_converter,
-    )
-
-    return CommandExpression(
-        *compiled,
-        _kwarg_converter=_kwarg_converter,
-        **kwargs,
-    )
-
-
-def run(
-    expression: ShalchemyExpression,
-    stdin: io.IOBase = sys.stdin,
-    stdout: io.IOBase = sys.stdout,
-    stderr: io.IOBase = sys.stderr,
-) -> int:
-    result = expression._run(
-        stdin=stdin,
-        stdout=stdout,
-        stderr=stderr
-    )
-    result.wait()
-    return result.main.returncode

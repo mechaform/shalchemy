@@ -1,4 +1,4 @@
-from .expressions import CommandExpression as sh, run
+from .runner import run, sh
 
 __all__ = [
     run,
