@@ -1,5 +1,3 @@
-from math import comb
-import tempfile
 from typing import Any, Callable, List, Union
 
 from enum import Enum
@@ -7,6 +5,8 @@ import io
 import os
 import sys
 import shlex
+import tempfile
+import textwrap
 import subprocess
 
 from .arguments import compile_arguments
@@ -74,9 +74,11 @@ def represent_file(file: Union[str, io.IOBase]):
 
 
 class ShalchemyBase:
+    @property
     def read_sub(self) -> 'ReadSubstitute':
         return ReadSubstitute(self)
 
+    @property
     def write_sub(self) -> 'WriteSubstitute':
         return WriteSubstitute(self)
 
@@ -116,8 +118,7 @@ class ShalchemyBase:
         from .runner import _internal_run
         result = _internal_run(self, stdout=subprocess.PIPE)
         answer = result.main.stdout.read().decode()
-        result.main.wait()
-
+        result.wait()
         return answer
 
     def __iter__(self):
@@ -178,16 +179,46 @@ class CommandExpression(ShalchemyBase):
         stdout: ShalchemyOutputStream,
         stderr: ShalchemyOutputStream,
     ) -> RunResult:
+        opened_processes = []
+        opened_files = []
+        opened_directories = []
+        arguments = []
+
+        for arg in self._args:
+            if isinstance(arg, ReadSubstitute):
+                context = arg._run(
+                    stdin=stdin,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+                opened_processes.extend(context.processes)
+                opened_files.extend(context.files)
+                opened_directories.extend(context.directories)
+                arguments.append(context.file.name)
+            elif isinstance(arg, WriteSubstitute):
+                context = arg._run(
+                    stdin=stdin,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+                opened_processes.extend(context.processes)
+                opened_files.extend(context.files)
+                opened_directories.extend(context.directories)
+                arguments.append(context.file.name)
+            else:
+                arguments.append(arg)
+
         process = subprocess.Popen(
-            self._args,
+            arguments,
             stdin=stdin,
             stdout=stdout,
             stderr=stderr,
         )
         return RunResult(
             main=process,
-            processes=[process],
-            files=[],
+            processes=[*opened_processes, process],
+            files=opened_files,
+            directories=opened_directories,
         )
 
     def _repr(self, paren: ParenthesisKind):
@@ -235,6 +266,7 @@ class PipeExpression(ShalchemyBase):
             main=context_rhs.main,
             processes=[*context_lhs.processes, *context_rhs.processes],
             files=[*context_lhs.files, *context_rhs.files],
+            directories=[*context_lhs.directories, *context_rhs.directories],
         )
 
     def _repr(self, paren: ParenthesisKind = ParenthesisKind.COMPOUND_ONLY):
@@ -279,6 +311,7 @@ class RedirectInExpression(ShalchemyBase):
             main=context_lhs.main,
             processes=context_lhs.processes,
             files=[*context_lhs.files, *opened_files],
+            directories=context_lhs.directories,
         )
 
     def _repr(self, paren: ParenthesisKind):
@@ -341,6 +374,7 @@ class RedirectOutExpression(ShalchemyBase):
             main=context_lhs.main,
             processes=context_lhs.processes,
             files=[*context_lhs.files, *opened_files],
+            directories=context_lhs.directories,
         )
 
     def _repr(self, paren: ParenthesisKind):
@@ -359,14 +393,72 @@ class RedirectOutExpression(ShalchemyBase):
         return f'$({self._repr(ParenthesisKind.NEVER)})'
 
 
-class ReadSubstitute(ShalchemyBase):
+class ProcessSubstituteExpression:
+    pass
+
+
+class ReadSubstitute(ProcessSubstituteExpression):
+    __doc__ = textwrap.dedent(
+        '''
+            Process substitution is a technique to make the output of a command
+            look like a file to the receiving process. One very common use of
+            this is when using the diff command. Suppose you wanted to diff the
+            file you have on disk with something on the internet. Normally, you
+            would do:
+
+            curl example.com/file.txt > tempfile.txt
+            diff file.txt tempfile.txt
+            rm tempfile.txt
+
+            But actually you can do:
+
+            diff file.txt <(curl example.com/file.txt)
+
+            The <(command) syntax makes sh create a "file" in /dev/fd/xxxx. This
+            is called Process Substitution.
+
+            The way you do the same with shalchemy is:
+            diff('file.txt', curl('example.com/file.txt').read_sub)
+
+            Once an expression's `read_sub` method is called, the result is a
+            ProcessSubstituteExpression which can no longer be composed with
+            other expressions. It can only be used as an argument directly to
+            other commands.
+        '''
+    ).strip()
+
     expression: ShalchemyExpression
 
     def __init__(self, expression: ShalchemyExpression):
         self.expression = expression
 
-    def _run(self, context: RunResult):
-        pass
+    def _run(
+        self,
+        stdin: io.IOBase,
+        stdout: ShalchemyOutputStream,
+        stderr: ShalchemyOutputStream,
+    ) -> RunResult:
+        # Create a temporary directory so we can get a file called /tmp/tmpXXXXXX/fifo
+        tmpdir = tempfile.mkdtemp()
+        filename = os.path.join(tmpdir, 'fifo')
+        writer = open(filename, 'w')
+        reader = open(filename, 'r')
+        opened_directories = [tmpdir]
+        opened_files = [
+            writer,
+            reader,
+        ]
+        context = self.expression._run(
+            stdin=stdin,
+            stdout=writer,
+            stderr=stderr,
+        )
+        return RunResult(
+            main=reader,
+            processes=context.processes,
+            files=[*context.files, *opened_files],
+            directories=[*context.directories, *opened_directories],
+        )
 
     def _repr(self, paren: ParenthesisKind = None):
         return f'<({self.expression._repr(ParenthesisKind.NEVER)})'
@@ -375,14 +467,76 @@ class ReadSubstitute(ShalchemyBase):
         return self._repr(paren=ParenthesisKind.ALWAYS)
 
 
-class WriteSubstitute(ShalchemyBase):
+class WriteSubstitute:
+    __doc__ = textwrap.dedent(
+        '''
+            Process write substitution is a technique to make the output of a
+            command look like a file to the receiving process. Write
+            substitution is less commonly used than read substitution, but
+            here's one (contrived) use-case:
+
+            Suppose for some reason you want tee to write the output of a
+            command to two different files. But one of them has to be uppercase
+            for whatever reason and the other has to be lowercase. Also you
+            want to see it in stdin. Normally what you would do is:
+
+            some_command | tee upper.txt lower.txt
+            tr [a-z] [A-Z] < upper.txt > actual_upper.txt
+            mv actual_upper.txt upper.txt
+            tr [A-A] [a-z] < lower.txt > actual_lower.txt
+            mv actual_lower.txt lower.txt
+
+            Very ugly. With write substitution you can do this instead:
+
+            some_command | tee >(tr [a-z] [A-Z] > upper.txt) >(tr [A-Z] [a-z] > lower.txt)            
+
+            The >(command) syntax makes sh create a "file" in /dev/fd/xxxx.
+            This is called Process Substitution.
+
+            The way you do the same with shalchemy is:
+            sh('some_command') | tee(
+                tr('[a-z]', '[A-Z]') > 'upper.txt').write_sub,
+                tr('[A-Z]', '[a-z]') > 'lower.txt').write_sub,
+            )
+
+            Once an expression's `write_sub` method is called, the result is a
+            ProcessSubstituteExpression which can no longer be composed with
+            other expressions. It can only be used as an argument directly to
+            other commands.3
+        '''
+    ).strip()
     expression: ShalchemyExpression
 
     def __init__(self, expression: ShalchemyExpression):
         self.expression = expression
 
-    def _run(self, context: RunResult):
-        pass
+    def _run(
+        self,
+        stdin: io.IOBase,
+        stdout: ShalchemyOutputStream,
+        stderr: ShalchemyOutputStream,
+    ) -> RunResult:
+        # Create a temporary directory so we can get a file called /tmp/tmpXXXXXX/fifo
+        tmpdir = tempfile.mkdtemp()
+        filename = os.path.join(tmpdir, 'fifo')
+        writer = open(filename, 'w')
+        reader = open(filename, 'r')
+        opened_directories = [tmpdir]
+        opened_files = [
+            writer,
+            reader,
+        ]
+        context = self.expression._run(
+            stdin=reader,
+            stdout=stdout,
+            stderr=stderr,
+        )
+        return RunResult(
+            main=writer,
+            processes=context.processes,
+            files=[*context.files, *opened_files],
+            directories=[*context.directories, *opened_directories],
+        )
 
     def _repr(self, paren: ParenthesisKind = None):
         return f'>({self.expression._repr(ParenthesisKind.NEVER)})'
