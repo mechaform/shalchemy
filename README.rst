@@ -49,7 +49,7 @@ During the evaluation phase, subprocesses are created, files are opened, and thi
 Pipes and Redirects
 ===================
 
-shalchemy expressions support pipes ``|`` and redirects (``<``, ``<<``, ``>``, ``>>``) for stdout.
+shalchemy expressions support pipes ``|`` and redirects (``<``, ``>``, ``>>``) for stdout.
 
 To redirect stderr, there is the ``stderr`` method.
 
@@ -78,7 +78,7 @@ Arguments
 
 There is something special about ``expr1`` that should be noted. If `sh` (or any ``CommandExpression``) receives a single string as the only argument, it will assume that you wanted to type a sh-compatible string and it'll automatically tokenize it for you using ``shlex``.
 
-In other words, ``sh('git show .')`` will create the Command ``sh(['git', 'show', '.'])``. If you don't like the automatic tokenization, you can explicitly provide a list with a single string inside``sh(['git show .'])``. Note that this second version will attempt to search your ``$PATH`` for a binary named ``git\ show\ .`` which is almost always not what anybody wants. Just a small warning for this special automatic tokenization thing that might become a gotcha one day.
+In other words, ``sh('git show .')`` will create the Command ``sh(['git', 'show', '.'])``. If you don't like the automatic tokenization, you can explicitly provide a list with a single string inside``sh(['git show .'])``. Note that this second version will attempt to search your ``$PATH`` for a binary named ``"git\ show\ ."`` which is almost always not what anybody wants. Just a small warning for this special automatic tokenization thing that might become a gotcha one day.
 
 shalchemy.bin
 =============
