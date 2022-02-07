@@ -47,6 +47,38 @@ class RunResult:
             shutil.rmtree(dir)
 
 
+class ReadSubstitutePreparation:
+    tmpdir: str
+    filename: str
+    writer: int
+    context: RunResult
+
+    def __init__(
+        self,
+        expression: 'ShalchemyExpression',
+        stdin: io.IOBase,
+        stdout: 'ShalchemyOutputStream',
+        stderr: 'ShalchemyOutputStream',
+    ):
+        # Create a temporary directory so we can get a file called /tmp/tmpXXXXXX/fifo
+        self.tmpdir = tempfile.mkdtemp()
+        self.filename = os.path.join(self.tmpdir, 'fifo')
+        self.writer = open(self.filename, 'w')
+        self.context = expression._run(
+            stdin=stdin,
+            stdout=self.writer,
+            stderr=stderr,
+        )
+
+    def _run(self):
+        return RunResult(
+            main=self.context.main,
+            processes=self.context.processes,
+            files=[*self.context.files, self.writer],
+            directories=[*self.context.directories, self.tmpdir]
+        )
+
+
 class WriteSubstitutePreparation:
     expression: 'ShalchemyExpression'
     stdin: io.IOBase

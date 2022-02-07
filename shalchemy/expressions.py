@@ -10,7 +10,7 @@ import textwrap
 import subprocess
 
 from .arguments import compile_arguments
-from .run_result import RunResult, WriteSubstitutePreparation
+from .run_result import RunResult, ReadSubstitutePreparation, WriteSubstitutePreparation
 
 
 class ParenthesisKind(Enum):
@@ -186,19 +186,7 @@ class CommandExpression(ShalchemyBase):
         arguments = []
 
         for arg in self._args:
-            if isinstance(arg, ReadSubstitute):
-                context = arg._run(
-                    stdin=stdin,
-                    stdout=stdout,
-                    stderr=stderr,
-                )
-                opened_processes.extend(context.processes)
-                opened_files.extend(context.files)
-                opened_directories.extend(context.directories)
-                arguments.append(context.file.name)
-            elif isinstance(arg, WriteSubstitute):
-                # We need to do these preparation things because mkfifo
-                # needs the write-side open before you can open the read side
+            if isinstance(arg, (ReadSubstitute, WriteSubstitute)):
                 preparation = arg._prepare(
                     stdin=stdin,
                     stdout=stdout,
@@ -440,32 +428,17 @@ class ReadSubstitute(ProcessSubstituteExpression):
     def __init__(self, expression: ShalchemyExpression):
         self.expression = expression
 
-    def _run(
+    def _prepare(
         self,
         stdin: io.IOBase,
         stdout: ShalchemyOutputStream,
         stderr: ShalchemyOutputStream,
     ) -> RunResult:
-        # Create a temporary directory so we can get a file called /tmp/tmpXXXXXX/fifo
-        tmpdir = tempfile.mkdtemp()
-        filename = os.path.join(tmpdir, 'fifo')
-        writer = open(filename, 'w')
-        reader = open(filename, 'r')
-        opened_directories = [tmpdir]
-        opened_files = [
-            writer,
-            reader,
-        ]
-        context = self.expression._run(
-            stdin=stdin,
-            stdout=writer,
-            stderr=stderr,
-        )
-        return RunResult(
-            main=reader,
-            processes=context.processes,
-            files=[*context.files, *opened_files],
-            directories=[*context.directories, *opened_directories],
+        return ReadSubstitutePreparation(
+            self.expression,
+            stdin,
+            stdout,
+            stderr
         )
 
     def _repr(self, paren: ParenthesisKind = None):
