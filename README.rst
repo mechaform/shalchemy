@@ -7,7 +7,7 @@ For when you get tired of Python and sh and want something in between.
 .. code:: python
   
     from shalchemy import sh, run
-    from shalchemy.bin import cat, grep
+    from shalchemy.bin import cat, curl, grep
  
     if cat('/etc/hosts') | grep('localhost'):
         run(curl('example.com') > 'file.txt')
