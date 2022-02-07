@@ -10,7 +10,7 @@ import textwrap
 import subprocess
 
 from .arguments import compile_arguments
-from .run_result import RunResult
+from .run_result import RunResult, WriteSubstitutePreparation
 
 
 class ParenthesisKind(Enum):
@@ -182,6 +182,7 @@ class CommandExpression(ShalchemyBase):
         opened_processes = []
         opened_files = []
         opened_directories = []
+        prepared_args = []
         arguments = []
 
         for arg in self._args:
@@ -196,15 +197,15 @@ class CommandExpression(ShalchemyBase):
                 opened_directories.extend(context.directories)
                 arguments.append(context.file.name)
             elif isinstance(arg, WriteSubstitute):
-                context = arg._run(
+                # We need to do these preparation things because mkfifo
+                # needs the write-side open before you can open the read side
+                preparation = arg._prepare(
                     stdin=stdin,
                     stdout=stdout,
                     stderr=stderr,
                 )
-                opened_processes.extend(context.processes)
-                opened_files.extend(context.files)
-                opened_directories.extend(context.directories)
-                arguments.append(context.file.name)
+                prepared_args.append(preparation)
+                arguments.append(preparation.filename)
             else:
                 arguments.append(arg)
 
@@ -214,6 +215,13 @@ class CommandExpression(ShalchemyBase):
             stdout=stdout,
             stderr=stderr,
         )
+
+        for preparation in prepared_args:
+            context = preparation._run()
+            opened_processes.extend(context.processes)
+            opened_files.extend(context.files)
+            opened_directories.extend(context.directories)
+
         return RunResult(
             main=process,
             processes=[*opened_processes, process],
@@ -510,32 +518,17 @@ class WriteSubstitute:
     def __init__(self, expression: ShalchemyExpression):
         self.expression = expression
 
-    def _run(
+    def _prepare(
         self,
         stdin: io.IOBase,
         stdout: ShalchemyOutputStream,
         stderr: ShalchemyOutputStream,
-    ) -> RunResult:
-        # Create a temporary directory so we can get a file called /tmp/tmpXXXXXX/fifo
-        tmpdir = tempfile.mkdtemp()
-        filename = os.path.join(tmpdir, 'fifo')
-        writer = open(filename, 'w')
-        reader = open(filename, 'r')
-        opened_directories = [tmpdir]
-        opened_files = [
-            writer,
-            reader,
-        ]
-        context = self.expression._run(
-            stdin=reader,
-            stdout=stdout,
-            stderr=stderr,
-        )
-        return RunResult(
-            main=writer,
-            processes=context.processes,
-            files=[*context.files, *opened_files],
-            directories=[*context.directories, *opened_directories],
+    ) -> WriteSubstitutePreparation:
+        return WriteSubstitutePreparation(
+            self.expression,
+            stdin,
+            stdout,
+            stderr
         )
 
     def _repr(self, paren: ParenthesisKind = None):

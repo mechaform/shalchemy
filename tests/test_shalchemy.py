@@ -184,12 +184,13 @@ class TestShalchemy(unittest.TestCase):
         )
         self.assertEqual(
             str(cat('./fixtures/shuffled_words.txt')),
-            str(cat('./fixtures/shuffled_words3.txt')),
+            str(cat('./fixtures/shuffled_words2.txt')),
         )
         self.assertEqual(
             str(cat('./fixtures/shuffled_words.txt')),
-            str(cat('./fixtures/shuffled_words2.txt')),
+            str(cat('./fixtures/shuffled_words3.txt')),
         )
+        sha.run(bin.rm('./fixtures/shuffled_words2.txt', './fixtures/shuffled_words3.txt'))
 
 
 if __name__ == '__main__':
