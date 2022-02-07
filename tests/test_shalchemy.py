@@ -1,11 +1,12 @@
-from glob import glob
-import textwrap
-from typing import Optional
+# Note that you need the -s flag on pytest when you run these tests otherwise
+# some of the tests will fail (i.e. `pytest -s`)
 
 import os
 import tempfile
+import textwrap
 import unittest
 import pytest
+from glob import glob
 
 import shalchemy as sha
 from shalchemy import sh, bin
@@ -177,8 +178,8 @@ class TestShalchemy(unittest.TestCase):
         sha.run(
             cat('./fixtures/shuffled_words.txt') |
             bin.tee(
-                (bin.xargs('echo')).write_sub,
-                (bin.xargs('echo')).write_sub,
+                (cat > './fixtures/shuffled_words2.txt').write_sub,
+                (cat > './fixtures/shuffled_words3.txt').write_sub,
             ) > '/dev/null'
         )
         self.assertEqual(
@@ -187,9 +188,8 @@ class TestShalchemy(unittest.TestCase):
         )
         self.assertEqual(
             str(cat('./fixtures/shuffled_words.txt')),
-            str(cat('./fixtures/shuffled_words3.txt')),
+            str(cat('./fixtures/shuffled_words2.txt')),
         )
-        sha.run(bin.run('./fixtures/shuffled_words2.txt', './fixtures/shuffled_words3.txt'))
 
 
 if __name__ == '__main__':
