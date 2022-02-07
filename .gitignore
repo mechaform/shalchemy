@@ -1,2 +1,3 @@
 shalchemy.egg-info/
 *.pyc
+/dist/*

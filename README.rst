@@ -47,7 +47,7 @@ These expressions on their own don't actively run the underlying system commands
 During the evaluation phase, subprocesses are created, files are opened, and things are piped together with Linux magic. The Python process blocks until everything is finished. Once all the processes are done, things are cleaned up, and the correct data type is provided to the user.
 
 Pipes and Redirects
-====
+===================
 
 shalchemy expressions support pipes ``|`` and redirects (``<``, ``<<``, ``>``, ``>>``) for stdout.
 
@@ -63,7 +63,7 @@ To redirect stderr, there is the ``stderr`` method.
 Sadly, Python doesn't support the 2> operation.
 
 Arguments
-====
+=========
 ``shalchemy.sh`` is used to create expressions. Calling it creates an internal ``CommandExpression``. These ``CommandExpressions`` hold arguments and can curry them. You can also access their properties to naturally generate curried expressions for subcommands. As a result, these four different python lines will create the same ``CommandExpression``:
 
 .. code:: python
@@ -81,6 +81,6 @@ There is something special about ``expr1`` that should be noted. If `sh` (or any
 In other words, ``sh('git show .')`` will create the Command ``sh(['git', 'show', '.'])``. If you don't like the automatic tokenization, you can explicitly provide a list with a single string inside``sh(['git show .'])``. Note that this second version will attempt to search your ``$PATH`` for a binary named ``git\ show\ .`` which is almost always not what anybody wants. Just a small warning for this special automatic tokenization thing that might become a gotcha one day.
 
 shalchemy.bin
-====
+=============
 
 The ``shalchemy.bin`` module is a magic module that wraps whatever you want to import in ``shalchemy.sh`` in a straightforward way. Importing ``grep`` from ``sqlalchemy.bin`` will just give you the result of ``sh('grep')``
