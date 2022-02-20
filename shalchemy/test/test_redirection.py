@@ -201,7 +201,7 @@ class TestRedirectionSimple(TestCase):
             self.assertEqual(stream.read(), self.content * 3)
 
 
-class TestRedirectionChained(TestBase):
+class TestRedirectionChained(TestCase):
     def test_stderr_stdout_devnull(self):
         sh.run(complain('--both', '-n', self.content).err_('&1', append=True))
         self.assertEqual(self.read_stdout(), self.content * 2)
@@ -243,3 +243,43 @@ class TestRedirectionChained(TestBase):
         stream_in.close()
         stream_out.close()
         stream_err.close()
+
+
+    def test_file_redirects(self):
+        some_input = tempfile.TemporaryFile('w+')
+        some_output = tempfile.TemporaryFile('w+')
+        some_input.write('hello world')
+        some_input.seek(0)
+        sh.run((sh('tr [a-z] [A-Z]') < some_input) > some_output)
+        some_output.seek(0)
+        result = some_output.read()
+        some_input.close()
+        some_output.close()
+        self.assertEqual(result, 'HELLO WORLD')
+
+    def test_io_strings(self):
+        some_input = io.StringIO('hello world')
+        some_output = io.StringIO()
+        sh.run((sh('tr [a-z] [A-Z]') < some_input) > some_output)
+        some_output.seek(0)
+        result = some_output.read()
+        some_input.close()
+        some_output.close()
+        self.assertEqual(result, 'HELLO WORLD')
+        stream = io.StringIO()
+        sh.run(bin.echo('-n', 'hello') > stream)
+        stream.seek(0)
+        self.assertEqual(stream.read(), 'hello')
+        self.assertEqual(str(bin.cat < io.StringIO('hello world')), 'hello world')
+
+    def test_file_redirects_alt(self):
+        some_input = tempfile.TemporaryFile('w+')
+        some_output = tempfile.TemporaryFile('w+')
+        some_input.write('hello world')
+        some_input.seek(0)
+        sh.run(sh('tr [a-z] [A-Z]').in_(some_input).out_(some_output))
+        some_output.seek(0)
+        output_text = some_output.read()
+        some_input.close()
+        some_output.close()
+        self.assertEqual(output_text, 'HELLO WORLD')

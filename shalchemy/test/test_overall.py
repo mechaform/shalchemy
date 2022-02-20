@@ -1,14 +1,12 @@
 # Note that you need the -s flag on pytest when you run these tests otherwise
 # some of the tests will fail (i.e. `pytest -s`)
-from typing import cast
 
-import io
 import tempfile
 import textwrap
 from glob import glob
 
 from shalchemy import sh, bin
-from shalchemy.bin import cat, diff, echo, find, grep, rm, wc
+from shalchemy.bin import cat, find, grep, wc
 from shalchemy.test.base import TestCase
 
 
@@ -74,45 +72,6 @@ class TestOverall(TestCase):
             4
         )
 
-    def test_file_redirects(self):
-        some_input = tempfile.TemporaryFile('w+')
-        some_output = tempfile.TemporaryFile('w+')
-        some_input.write('hello world')
-        some_input.seek(0)
-        sh.run((sh('tr [a-z] [A-Z]') < some_input) > some_output)
-        some_output.seek(0)
-        result = some_output.read()
-        some_input.close()
-        some_output.close()
-        self.assertEqual(result, 'HELLO WORLD')
-
-    def test_io_strings(self):
-        some_input = io.StringIO('hello world')
-        some_output = io.StringIO()
-        sh.run((sh('tr [a-z] [A-Z]') < some_input) > some_output)
-        some_output.seek(0)
-        result = some_output.read()
-        some_input.close()
-        some_output.close()
-        self.assertEqual(result, 'HELLO WORLD')
-        stream = io.StringIO()
-        sh.run(echo('-n', 'hello') > stream)
-        stream.seek(0)
-        self.assertEqual(stream.read(), 'hello')
-        self.assertEqual(str(cat < io.StringIO('hello world')), 'hello world')
-
-    def test_file_redirects_alt(self):
-        some_input = tempfile.TemporaryFile('w+')
-        some_output = tempfile.TemporaryFile('w+')
-        some_input.write('hello world')
-        some_input.seek(0)
-        sh.run(sh('tr [a-z] [A-Z]').in_(some_input).out_(some_output))
-        some_output.seek(0)
-        output_text = some_output.read()
-        some_input.close()
-        some_output.close()
-        self.assertEqual(output_text, 'HELLO WORLD')
-
     def test_bool(self):
         if not ((grep('apple') < './fixtures/shuffled_words.txt') > '/dev/null'):
             raise Exception('That should have been true')
@@ -136,7 +95,7 @@ class TestOverall(TestCase):
             'watermelon',
         ])
 
-    def test_interpolate(self):
+    def test_interpolate_string(self):
         result = str(bin.wc(f'-l {bin.find("./fixtures/ -name *_words.txt -type f")}'))
         expected = """
             10 ./fixtures/shuffled_words.txt
@@ -167,31 +126,3 @@ class TestOverall(TestCase):
         for x in cat('./fixtures/lorem_ipsum.txt') | bin.sort:
             result.append(x)
         self.assertEqual('\n'.join(result).strip(), result2.strip())
-
-    def test_read_sub(self):
-        self.assertTrue(diff(
-            (cat('./fixtures/shuffled_words.txt') | bin.sort('-r')).read_sub,
-            (cat('./fixtures/shuffled_words.txt') | bin.sort | bin.tac).read_sub,
-        ) > '/dev/null')
-        self.assertFalse(diff(
-            (cat('./fixtures/shuffled_words.txt') | bin.sort('-r')).read_sub,
-            (cat('./fixtures/shuffled_words.txt') | bin.sort).read_sub,
-        ) > '/dev/null')
-
-    def test_write_sub(self):
-        sh.run(
-            cat('./fixtures/shuffled_words.txt') |
-            bin.tee(
-                (cat > './fixtures/shuffled_words2.txt').write_sub,
-                (cat > './fixtures/shuffled_words3.txt').write_sub,
-            ) > '/dev/null'
-        )
-        self.assertEqual(
-            str(cat('./fixtures/shuffled_words.txt')),
-            str(cat('./fixtures/shuffled_words2.txt')),
-        )
-        self.assertEqual(
-            str(cat('./fixtures/shuffled_words.txt')),
-            str(cat('./fixtures/shuffled_words3.txt')),
-        )
-        sh.run(bin.rm('./fixtures/shuffled_words2.txt', './fixtures/shuffled_words3.txt'))
