@@ -18,11 +18,11 @@ shalchemy.runner._DEFAULT_STDERR = FAKE_STDERR
 os.chdir(os.path.dirname(__file__))
 
 
-def random_string(length: int = 16):
+def random_string(length: int = 16) -> str:
     return ''.join(random.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(length))
 
 
-def random_filename():
+def random_filename() -> str:
     return os.path.join('garbage', f'{random_string()}.txt')
 
 

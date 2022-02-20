@@ -1,9 +1,10 @@
+from typing import cast, List
 import argparse
+import io
 import json
 import os
 import sys
 import select
-from typing import List
 
 
 def run_complain(args: argparse.Namespace, rest: List[str]):
@@ -39,6 +40,39 @@ def run_errcat(args: argparse.Namespace, rest: List[str]):
             os.write(stderr_fd, data)
 
 
+def run_kwcat(args: argparse.Namespace, rest: List[str]):
+    kwargs = [args.apple, args.banana, args.carrot]
+    for filename in kwargs:
+        if filename is None:
+            continue
+        with open(filename, 'r') as file:
+            print(file.read(), end='')
+
+
+def run_kwtee(args: argparse.Namespace, rest: List[str]):
+    files: List[io.IOBase] = []
+    kwargs = [args.apple, args.banana, args.carrot]
+    for filename in kwargs:
+        if filename is not None:
+            fp = cast(io.IOBase, open(filename, 'wb'))
+            files.append(fp)
+
+    stdin_fd = sys.stdin.fileno()
+    stdout_fd = sys.stdout.fileno()
+    while True:
+        ready, _, _ = select.select([sys.stdin], [], [], 0.0)
+        if sys.stdin in ready:
+            data = os.read(stdin_fd, 4096)
+            if len(data) == 0:
+                break
+            for file in files:
+                file.write(data)
+            os.write(stdout_fd, data)
+
+    for file in files:
+        file.close()
+
+
 def run_args(args: argparse.Namespace, rest: List[str]):
     print(json.dumps(sys.argv))
 
@@ -56,6 +90,18 @@ def probe_main():
     parser_errcat.add_argument('--both', action='store_true')
     parser_errcat.add_argument('files', nargs='*')
     parser_errcat.set_defaults(func=run_errcat)
+
+    parser_kwtee = subparsers.add_parser('kwtee', help='kwtee is like tee but the files are keyword arguments for testing purposes')
+    parser_kwtee.add_argument('--apple')
+    parser_kwtee.add_argument('--banana')
+    parser_kwtee.add_argument('--carrot')
+    parser_kwtee.set_defaults(func=run_kwtee)
+
+    parser_kwcat = subparsers.add_parser('kwcat', help='kwcat is like cat but the files are keyword arguments for testing purposes')
+    parser_kwcat.add_argument('--apple')
+    parser_kwcat.add_argument('--banana')
+    parser_kwcat.add_argument('--carrot')
+    parser_kwcat.set_defaults(func=run_kwcat)
 
     parser_args = subparsers.add_parser('args', help='args prints out the args provided')
     parser_args.set_defaults(func=run_args)

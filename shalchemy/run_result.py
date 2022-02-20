@@ -148,7 +148,7 @@ class WriteSubstitutePreparation:
         os.mkfifo(self.filename, 0o600)
 
     def _run(self) -> RunResult:
-        reader = os.open(self.filename, os.O_NONBLOCK + os.O_RDONLY)
+        reader = cast(io.IOBase, open(self.filename, 'r'))
         opened_directories = [self.tmpdir]
         opened_files = [reader]
         context = self.expression._run(

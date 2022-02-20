@@ -146,7 +146,7 @@ class CommandExpression(ShalchemyExpression):
 
         renderer: KeywordArgumentRenderer
         if '_kwarg_render' in kwargs:
-            renderer = kwargs.pop('_kwarg_render')
+            renderer = cast(KeywordArgumentRenderer, kwargs.pop('_kwarg_render'))
         else:
             renderer = getattr(self, '_kwarg_render')
 
@@ -190,9 +190,14 @@ class CommandExpression(ShalchemyExpression):
                 prepared_args.append(preparation)
                 arguments.append(preparation.filename)
             elif isinstance(arg, UncompiledArgument):
-                result = arg.compile()
-                arguments.extend(result.args)
-                prepared_args.extend(result.prepared_args)
+                preparation = arg.value._prepare(
+                    stdin=stdin,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+                compiled_args = arg.compile(preparation.filename)
+                prepared_args.append(preparation)
+                arguments.extend(compiled_args)
             else:
                 arguments.append(arg)
 

@@ -78,22 +78,10 @@ class UncompiledArgument:
         self.value = value
         setattr(self, 'render', render)
 
-    def compile(self) -> ArgumentCompilationResult:
-        prepared_args: List[Union[WriteSubstitutePreparation, ReadSubstitutePreparation]] = []
-
+    def compile(self, filename: str) -> Sequence[str]:
         # Avoid mypy typing self.render as a bound method
         render: KeywordArgumentRenderer = getattr(self, 'render')
-        if isinstance(self.value, (ReadSubstitute, WriteSubstitute)):
-            preparation = self.value._prepare(
-                stdin=cast(io.IOBase, sys.stdin),
-                stdout=cast(io.IOBase, sys.stdout),
-                stderr=cast(io.IOBase, sys.stderr),
-            )
-            prepared_args.append(preparation)
-            args = render(self.key, preparation.filename)
-        else:
-            args = render(self.key, self.value)
-        return ArgumentCompilationResult(args=args, prepared_args=prepared_args)
+        return render(self.key, filename)
 
     def _repr(self, paren: ParenthesisKind = None):
         render: KeywordArgumentRenderer = getattr(self, 'render')
