@@ -26,7 +26,7 @@ def random_filename():
     return os.path.join('garbage', f'{random_string()}.txt')
 
 
-class TestBase(unittest.TestCase):
+class TestCase(unittest.TestCase):
     content: str
     filename: str
     fileobj: io.TextIOWrapper

@@ -3,16 +3,15 @@
 
 import io
 import tempfile
-import unittest
 
 from shalchemy import sh, bin
-import shalchemy.runner
-from shalchemy.test.test_base import TestBase
+from shalchemy.test.base import TestCase
 
-complain = shalchemy.bin.shalchemyprobe.complain
-errcat = shalchemy.bin.shalchemyprobe.errcat
+complain = bin.shalchemyprobe.complain
+errcat = bin.shalchemyprobe.errcat
 
-class TestRedirectionSimple(TestBase):
+
+class TestRedirectionSimple(TestCase):
     # Tests for >
     def test_filename_out(self):
         # Works

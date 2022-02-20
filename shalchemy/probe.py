@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 import select
@@ -39,7 +40,7 @@ def run_errcat(args: argparse.Namespace, rest: List[str]):
 
 
 def run_args(args: argparse.Namespace, rest: List[str]):
-    print(sys.argv)
+    print(json.dumps(sys.argv))
 
 
 def probe_main():

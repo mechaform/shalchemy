@@ -144,16 +144,22 @@ class CommandExpression(ShalchemyExpression):
                 _kwarg_render=getattr(self, '_kwarg_render'),
             )
 
+        renderer: KeywordArgumentRenderer
+        if '_kwarg_render' in kwargs:
+            renderer = kwargs.pop('_kwarg_render')
+        else:
+            renderer = getattr(self, '_kwarg_render')
+
         compiled = compile_arguments(
             args,
             kwargs,
-            _kwarg_render=getattr(self, '_kwarg_render'),
+            _kwarg_render=renderer,
         )
 
         return CommandExpression(
             *self._args,
             *compiled,
-            _kwarg_render=getattr(self, '_kwarg_render'),
+            _kwarg_render=renderer,
         )
 
     def __getattr__(self, attr):

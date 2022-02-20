@@ -3,19 +3,16 @@
 from typing import cast
 
 import io
-import os
 import tempfile
 import textwrap
-import unittest
-import pytest
 from glob import glob
 
 from shalchemy import sh, bin
 from shalchemy.bin import cat, diff, echo, find, grep, rm, wc
-from shalchemy.test.test_base import TestBase
+from shalchemy.test.base import TestCase
 
 
-class TestShalchemy(TestBase):
+class TestOverall(TestCase):
     def test_basic(self):
         self.assertTrue(cat('./fixtures/shuffled_words.txt') | grep('apple') > '/dev/null')
         self.assertEqual(self.read_stdout(), '')

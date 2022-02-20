@@ -16,8 +16,10 @@ from shalchemy.types import (
 
 
 def default_kwarg_render(keyword: str, value: PublicKeywordArgument) -> Sequence[str]:
-    if isinstance(value, bool):
+    if value is True:
         return [f"--{keyword.replace('_', '-')}"]
+    elif value is None or value is False:
+        return []
     return [f"--{keyword.replace('_', '-')}={value}"]
 
 
