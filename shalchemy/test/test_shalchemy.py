@@ -12,36 +12,27 @@ from glob import glob
 
 from shalchemy import sh, bin
 from shalchemy.bin import cat, diff, echo, find, grep, rm, wc
-import shalchemy.runner
-
-FAKE_STDIN = cast(io.IOBase, tempfile.TemporaryFile())
-shalchemy.runner._DEFAULT_STDIN = FAKE_STDIN
-
-os.chdir(os.path.dirname(__file__))
+from shalchemy.test.test_base import TestBase
 
 
-class TestShalchemy(unittest.TestCase):
-    @pytest.fixture(autouse=True)
-    def capfd(self, capfd):
-        self.capfd = capfd
-
+class TestShalchemy(TestBase):
     def test_basic(self):
         self.assertTrue(cat('./fixtures/shuffled_words.txt') | grep('apple') > '/dev/null')
-        self.assertEqual(self.capfd.readouterr().out, '')
-        self.assertEqual(self.capfd.readouterr().err, '')
+        self.assertEqual(self.read_stdout(), '')
+        self.assertEqual(self.read_stderr(), '')
 
         self.assertTrue(cat('./fixtures/shuffled_words.txt') | grep('apple'))
-        self.assertEqual(self.capfd.readouterr().out.strip(), 'apple')
-        self.assertEqual(self.capfd.readouterr().err, '')
+        self.assertEqual(self.read_stdout().strip(), 'apple')
+        self.assertEqual(self.read_stderr(), '')
 
         self.assertTrue(grep('apple') < './fixtures/shuffled_words.txt')
-        self.assertEqual(self.capfd.readouterr().out.strip(), 'apple')
-        self.assertEqual(self.capfd.readouterr().err, '')
+        self.assertEqual(self.read_stdout().strip(), 'apple')
+        self.assertEqual(self.read_stderr(), '')
 
         self.assertEqual(str(grep('apple') < './fixtures/shuffled_words.txt').rstrip(), 'apple')
         self.assertEqual(int(grep('apple') | sh('wc -c') < './fixtures/shuffled_words.txt'), 6)
-        self.assertEqual(self.capfd.readouterr().out, '')
-        self.assertEqual(self.capfd.readouterr().err, '')
+        self.assertEqual(self.read_stdout(), '')
+        self.assertEqual(self.read_stderr(), '')
 
     def test_pipe(self):
         self.assertEqual(
@@ -160,9 +151,6 @@ class TestShalchemy(unittest.TestCase):
             textwrap.dedent(expected).strip(),
         )
 
-    def test_pipe_stdout(self):
-        x = str(rm('missing-file.txt') >= '&1')
-
     def test_find(self):
         with tempfile.TemporaryFile('w+') as tf:
             for file in find('./fixtures', '-name', '*_words.txt'):
@@ -210,7 +198,3 @@ class TestShalchemy(unittest.TestCase):
             str(cat('./fixtures/shuffled_words3.txt')),
         )
         sh.run(bin.rm('./fixtures/shuffled_words2.txt', './fixtures/shuffled_words3.txt'))
-
-
-if __name__ == '__main__':
-    unittest.main()

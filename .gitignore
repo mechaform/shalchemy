@@ -1,4 +1,4 @@
-/tests/garbage/
+/shalchemy/test/garbage/
 shalchemy.egg-info/
 *.pyc
 /dist/*

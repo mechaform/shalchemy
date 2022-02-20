@@ -77,9 +77,6 @@ class ShalchemyExpression:
     def __ge__(self, rhs: ShalchemyFile):
         return RedirectOutExpression(self, rhs, stderr=True, append=False)
 
-    def __irshift__(self, rhs: ShalchemyFile):
-        return RedirectOutExpression(self, rhs, stderr=True, append=True)
-
     def in_(self, rhs: ShalchemyFile, append: bool = False):
         return RedirectInExpression(self, rhs)
 
