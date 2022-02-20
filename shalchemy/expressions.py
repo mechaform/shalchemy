@@ -1,6 +1,5 @@
-from dataclasses import dataclass
 from tempfile import TemporaryFile
-from typing import Any, Tuple, Type, cast, IO, List, Optional, OrderedDict, Sequence, Union
+from typing import Any, cast, IO, List, Optional, Sequence, Union
 
 import io
 import shlex
@@ -63,17 +62,23 @@ class ShalchemyExpression:
     def write_sub(self) -> 'WriteSubstitute':
         return WriteSubstitute(self)
 
-    def __or__(self, rhs):
+    def __or__(self, rhs: 'ShalchemyExpression'):
         return PipeExpression(self, rhs)
 
-    def __lt__(self, rhs):
+    def __lt__(self, rhs: ShalchemyFile):
         return RedirectInExpression(self, rhs)
 
-    def __gt__(self, rhs):
+    def __gt__(self, rhs: ShalchemyFile):
         return RedirectOutExpression(self, rhs, append=False)
 
-    def __rshift__(self, rhs):
+    def __rshift__(self, rhs: ShalchemyFile):
         return RedirectOutExpression(self, rhs, append=True)
+
+    def __ge__(self, rhs: ShalchemyFile):
+        return RedirectOutExpression(self, rhs, stderr=True, append=False)
+
+    def __irshift__(self, rhs: ShalchemyFile):
+        return RedirectOutExpression(self, rhs, stderr=True, append=True)
 
     def in_(self, rhs: ShalchemyFile, append: bool = False):
         return RedirectInExpression(self, rhs)

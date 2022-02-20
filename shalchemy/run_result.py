@@ -1,6 +1,4 @@
-from cmath import exp
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Tuple, cast, List, Optional, Sequence
+from typing import TYPE_CHECKING, cast, List, Optional, Sequence
 
 import io
 import os
@@ -35,8 +33,8 @@ class StreamPipe:
 
 class FileResult:
     fileno: int
-    open_files: List[io.IOBase] = list
-    stream_pipes: List[StreamPipe] = list
+    open_files: List[io.IOBase]
+    stream_pipes: List[StreamPipe]
 
     def __init__(
         self,
@@ -63,7 +61,7 @@ class RunResult:
         processes: Optional[List[subprocess.Popen]] = None,
         files: Optional[List['ShalchemyOutputStream']] = None,
         directories: Optional[List[str]] = None,
-        stream_pipes: List[Tuple[io.IOBase, io.IOBase]] = None,
+        stream_pipes: List[StreamPipe] = None,
     ):
         if isinstance(main, subprocess.Popen):
             self.main = main

@@ -10,9 +10,8 @@ import unittest
 import pytest
 from glob import glob
 
-import shalchemy as sha
 from shalchemy import sh, bin
-from shalchemy.bin import cat, diff, echo, find, grep, wc
+from shalchemy.bin import cat, diff, echo, find, grep, rm, wc
 import shalchemy.runner
 
 FAKE_STDIN = cast(io.IOBase, tempfile.TemporaryFile())
@@ -92,7 +91,7 @@ class TestShalchemy(unittest.TestCase):
         some_output = tempfile.TemporaryFile('w+')
         some_input.write('hello world')
         some_input.seek(0)
-        sha.run((sh('tr [a-z] [A-Z]') < some_input) > some_output)
+        sh.run((sh('tr [a-z] [A-Z]') < some_input) > some_output)
         some_output.seek(0)
         result = some_output.read()
         some_input.close()
@@ -102,7 +101,7 @@ class TestShalchemy(unittest.TestCase):
     def test_io_strings(self):
         some_input = io.StringIO('hello world')
         some_output = io.StringIO()
-        sha.run((sh('tr [a-z] [A-Z]') < some_input) > some_output)
+        sh.run((sh('tr [a-z] [A-Z]') < some_input) > some_output)
         some_output.seek(0)
         result = some_output.read()
         some_input.close()
@@ -119,7 +118,7 @@ class TestShalchemy(unittest.TestCase):
         some_output = tempfile.TemporaryFile('w+')
         some_input.write('hello world')
         some_input.seek(0)
-        sha.run(sh('tr [a-z] [A-Z]').in_(some_input).out_(some_output))
+        sh.run(sh('tr [a-z] [A-Z]').in_(some_input).out_(some_output))
         some_output.seek(0)
         output_text = some_output.read()
         some_input.close()
@@ -161,10 +160,13 @@ class TestShalchemy(unittest.TestCase):
             textwrap.dedent(expected).strip(),
         )
 
+    def test_pipe_stdout(self):
+        x = str(rm('missing-file.txt') >= '&1')
+
     def test_find(self):
         with tempfile.TemporaryFile('w+') as tf:
             for file in find('./fixtures', '-name', '*_words.txt'):
-                sha.run(cat(file) >> tf)
+                sh.run(cat(file) >> tf)
             tf.seek(0)
             result1 = tf.read()
 
@@ -192,7 +194,7 @@ class TestShalchemy(unittest.TestCase):
         ) > '/dev/null')
 
     def test_write_sub(self):
-        sha.run(
+        sh.run(
             cat('./fixtures/shuffled_words.txt') |
             bin.tee(
                 (cat > './fixtures/shuffled_words2.txt').write_sub,
@@ -207,7 +209,7 @@ class TestShalchemy(unittest.TestCase):
             str(cat('./fixtures/shuffled_words.txt')),
             str(cat('./fixtures/shuffled_words3.txt')),
         )
-        sha.run(bin.rm('./fixtures/shuffled_words2.txt', './fixtures/shuffled_words3.txt'))
+        sh.run(bin.rm('./fixtures/shuffled_words2.txt', './fixtures/shuffled_words3.txt'))
 
 
 if __name__ == '__main__':
