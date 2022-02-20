@@ -12,7 +12,7 @@ from glob import glob
 
 import shalchemy as sha
 from shalchemy import sh, bin
-from shalchemy.bin import cat, diff, find, grep, wc
+from shalchemy.bin import cat, diff, echo, find, grep, wc
 import shalchemy.runner
 
 FAKE_STDIN = cast(io.IOBase, tempfile.TemporaryFile())
@@ -44,13 +44,7 @@ class TestShalchemy(unittest.TestCase):
         self.assertEqual(self.capfd.readouterr().out, '')
         self.assertEqual(self.capfd.readouterr().err, '')
 
-    def test_if(self):
-        if not ((grep('apple') < './fixtures/shuffled_words.txt')) > '/dev/null':
-            raise Exception('That should have been true')
-        if grep('impossible') < './fixtures/shuffled_words.txt':
-            raise Exception('That should have been true')
-
-    def test_chained(self):
+    def test_pipe(self):
         self.assertEqual(
             int(
                 cat(
@@ -105,6 +99,21 @@ class TestShalchemy(unittest.TestCase):
         some_output.close()
         self.assertEqual(result, 'HELLO WORLD')
 
+    def test_io_strings(self):
+        some_input = io.StringIO('hello world')
+        some_output = io.StringIO()
+        sha.run((sh('tr [a-z] [A-Z]') < some_input) > some_output)
+        some_output.seek(0)
+        result = some_output.read()
+        some_input.close()
+        some_output.close()
+        self.assertEqual(result, 'HELLO WORLD')
+        stream = io.StringIO()
+        sh.run(echo('-n', 'hello') > stream)
+        stream.seek(0)
+        self.assertEqual(stream.read(), 'hello')
+        self.assertEqual(str(cat < io.StringIO('hello world')), 'hello world')
+
     def test_file_redirects_alt(self):
         some_input = tempfile.TemporaryFile('w+')
         some_output = tempfile.TemporaryFile('w+')
@@ -116,6 +125,12 @@ class TestShalchemy(unittest.TestCase):
         some_input.close()
         some_output.close()
         self.assertEqual(output_text, 'HELLO WORLD')
+
+    def test_bool(self):
+        if not ((grep('apple') < './fixtures/shuffled_words.txt') > '/dev/null'):
+            raise Exception('That should have been true')
+        if grep('impossible') < './fixtures/shuffled_words.txt':
+            raise Exception('That should have been true')
 
     def test_iter(self):
         result = []
@@ -149,7 +164,7 @@ class TestShalchemy(unittest.TestCase):
     def test_find(self):
         with tempfile.TemporaryFile('w+') as tf:
             for file in find('./fixtures', '-name', '*_words.txt'):
-                sha.run(cat(file) > tf)
+                sha.run(cat(file) >> tf)
             tf.seek(0)
             result1 = tf.read()
 

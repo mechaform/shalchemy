@@ -1,4 +1,6 @@
-from typing import Any, cast, IO, List, Optional, OrderedDict, Sequence, Union
+from dataclasses import dataclass
+from tempfile import TemporaryFile
+from typing import Any, Tuple, Type, cast, IO, List, Optional, OrderedDict, Sequence, Union
 
 import io
 import shlex
@@ -6,7 +8,13 @@ import textwrap
 import subprocess
 
 from .arguments import UncompiledArgument, compile_arguments
-from .run_result import RunResult, ReadSubstitutePreparation, WriteSubstitutePreparation
+from .run_result import (
+    FileResult,
+    RunResult,
+    ReadSubstitutePreparation,
+    StreamPipe,
+    WriteSubstitutePreparation,
+)
 from .types import (
     ParenthesisKind,
     PublicArgument,
@@ -62,18 +70,21 @@ class ShalchemyExpression:
         return RedirectInExpression(self, rhs)
 
     def __gt__(self, rhs):
-        return RedirectOutExpression(self, rhs)
+        return RedirectOutExpression(self, rhs, append=False)
 
-    def in_(self, rhs):
+    def __rshift__(self, rhs):
+        return RedirectOutExpression(self, rhs, append=True)
+
+    def in_(self, rhs: ShalchemyFile, append: bool = False):
         return RedirectInExpression(self, rhs)
 
-    def out_(self, rhs):
-        return RedirectOutExpression(self, rhs)
+    def out_(self, rhs: ShalchemyFile, append: bool = False):
+        return RedirectOutExpression(self, rhs, append=append)
 
-    def err_(self, destination: ShalchemyFile, append=False):
+    def err_(self, rhs: ShalchemyFile, append: bool = False):
         return RedirectOutExpression(
             self,
-            destination,
+            rhs,
             append=append,
             stderr=True,
         )
@@ -157,6 +168,7 @@ class CommandExpression(ShalchemyExpression):
         opened_processes: List[subprocess.Popen] = []
         opened_files: List[ShalchemyOutputStream] = []
         opened_directories: List[str] = []
+        opened_stream_pipes: List[StreamPipe] = []
         prepared_args: List[Union[WriteSubstitutePreparation, ReadSubstitutePreparation]] = []
         arguments: List[str] = []
 
@@ -188,12 +200,14 @@ class CommandExpression(ShalchemyExpression):
             opened_processes.extend(context.processes)
             opened_files.extend(context.files)
             opened_directories.extend(context.directories)
+            opened_stream_pipes.extend(context.stream_pipes)
 
         return RunResult(
             main=process,
             processes=[*opened_processes, process],
             files=opened_files,
             directories=opened_directories,
+            stream_pipes=opened_stream_pipes,
         )
 
     def _repr(self, paren: ParenthesisKind):
@@ -242,6 +256,7 @@ class PipeExpression(ShalchemyExpression):
             processes=[*context_lhs.processes, *context_rhs.processes],
             files=[*context_lhs.files, *context_rhs.files],
             directories=[*context_lhs.directories, *context_rhs.directories],
+            stream_pipes=[*context_lhs.stream_pipes, *context_rhs.stream_pipes],
         )
 
     def _repr(self, paren: ParenthesisKind = ParenthesisKind.COMPOUND_ONLY):
@@ -263,6 +278,30 @@ class RedirectInExpression(ShalchemyExpression):
     def __init__(self, lhs: ShalchemyExpression, rhs: ShalchemyFile):
         self.lhs = lhs
         self.rhs = rhs
+        if not isinstance(rhs, (io.IOBase, str)):
+            raise TypeError('Expected a str or io.IOBase', rhs)
+
+    def _make_os_file(self, file: ShalchemyFile) -> FileResult:
+        if isinstance(file, str):
+            osfile = cast(io.IOBase, open(file, 'r'))
+            return FileResult(fileno=osfile.fileno(), open_files=[osfile])
+
+        try:
+            fileno = file.fileno()
+            return FileResult(fileno)
+        except io.UnsupportedOperation:
+            pass
+
+        tf: io.IOBase
+        if isinstance(file, io.BytesIO):
+            tf = cast(io.IOBase, TemporaryFile('wb+'))
+            tf.write(file.read())
+            tf.seek(0)
+        else:
+            tf = cast(io.IOBase, TemporaryFile('wt+'))
+            tf.write(file.read())
+            tf.seek(0)
+        return FileResult(tf.fileno(), open_files=[tf])
 
     def _run(
         self,
@@ -270,24 +309,19 @@ class RedirectInExpression(ShalchemyExpression):
         stdout: Optional[ShalchemyOutputStream],
         stderr: Optional[ShalchemyOutputStream],
     ) -> RunResult:
-        opened_files = []
-        actual_stdin: io.IOBase
-        if isinstance(self.rhs, str):
-            actual_stdin = cast(io.IOBase, open(self.rhs, 'r'))
-            opened_files.append(actual_stdin)
-        else:
-            actual_stdin = self.rhs
+        file_result = self._make_os_file(self.rhs)
 
         context_lhs = self.lhs._run(
-            stdin=actual_stdin,
+            stdin=file_result.fileno,
             stdout=stdout,
             stderr=stderr,
         )
         return RunResult(
             main=context_lhs.main,
             processes=context_lhs.processes,
-            files=[*context_lhs.files, *opened_files],
+            files=[*context_lhs.files, *file_result.open_files],
             directories=context_lhs.directories,
+            stream_pipes=context_lhs.stream_pipes,
         )
 
     def _repr(self, paren: ParenthesisKind):
@@ -300,7 +334,7 @@ class RedirectInExpression(ShalchemyExpression):
 class RedirectOutExpression(ShalchemyExpression):
     lhs: ShalchemyExpression
     rhs: ShalchemyFile
-    output_to_stderr: bool
+    redirect_stderr: bool
     append: bool
     _parents: List[ShalchemyExpression]
     _process: subprocess.Popen
@@ -310,8 +344,46 @@ class RedirectOutExpression(ShalchemyExpression):
         self.lhs = lhs
         self.rhs = rhs
         self.append = append
-        self.output_to_stderr = stderr
+        self.redirect_stderr = stderr
         self._parents = []
+
+
+    def _make_os_file(self, file: ShalchemyFile, append: bool) -> FileResult:
+        if isinstance(file, str):
+            if file == '&1':
+                return FileResult(fileno=subprocess.STDOUT, open_files=[])
+            elif file == '&2':
+                raise ValueError('Redirects to stderr (&2) is unsupported')
+            mode = 'a' if append else 'w'
+            osfile = open(file, mode)
+            return FileResult(fileno=osfile.fileno(), open_files=[cast(io.IOBase, osfile)])
+
+        try:
+            fileno = file.fileno()
+            if not append:
+                try:
+                    file.truncate(0)
+                    file.seek(0)
+                except io.UnsupportedOperation:
+                    pass
+            return FileResult(fileno, open_files=[])
+        except io.UnsupportedOperation:
+            pass
+
+        tf: io.IOBase
+        if isinstance(file, io.BytesIO):
+            tf = cast(io.IOBase, TemporaryFile('w+b'))
+            tf.write(file.read())
+            tf.seek(0)
+        else:
+            tf = cast(io.IOBase, TemporaryFile('w+t'))
+            tf.write(file.read())
+            tf.seek(0)
+        return FileResult(
+            tf.fileno(),
+            open_files=[tf],
+            stream_pipes=[StreamPipe(source=tf, dest=file, append=append)],
+        )
 
     def _run(
         self,
@@ -319,29 +391,17 @@ class RedirectOutExpression(ShalchemyExpression):
         stdout: Optional[ShalchemyOutputStream],
         stderr: Optional[ShalchemyOutputStream],
     ) -> RunResult:
-        opened_files = []
         actual_stdout: Optional[ShalchemyOutputStream]
         actual_stderr: Optional[ShalchemyOutputStream]
-        if self.output_to_stderr:
+        file_result: FileResult
+        if self.redirect_stderr:
+            file_result = self._make_os_file(self.rhs, self.append)
             actual_stdout = stdout
-            if isinstance(self.rhs, io.IOBase):
-                actual_stderr = self.rhs
-            elif self.append:
-                actual_stderr = cast(io.IOBase, open(self.rhs, 'a'))
-                opened_files.append(actual_stderr)
-            else:
-                actual_stderr = cast(io.IOBase, open(self.rhs, 'w'))
-                opened_files.append(actual_stderr)
+            actual_stderr = file_result.fileno
         else:
+            file_result = self._make_os_file(self.rhs, self.append)
+            actual_stdout = file_result.fileno
             actual_stderr = stderr
-            if isinstance(self.rhs, io.IOBase):
-                actual_stdout = self.rhs
-            elif self.append:
-                actual_stdout = cast(io.IOBase, open(self.rhs, 'a'))
-                opened_files.append(actual_stdout)
-            else:
-                actual_stdout = cast(io.IOBase, open(self.rhs, 'w'))
-                opened_files.append(actual_stdout)
 
         context_lhs = self.lhs._run(
             stdin=stdin,
@@ -351,14 +411,15 @@ class RedirectOutExpression(ShalchemyExpression):
         return RunResult(
             main=context_lhs.main,
             processes=context_lhs.processes,
-            files=[*context_lhs.files, *opened_files],
+            files=[*context_lhs.files, *file_result.open_files],
             directories=context_lhs.directories,
+            stream_pipes=[*context_lhs.stream_pipes, *file_result.stream_pipes],
         )
 
     def _repr(self, paren: ParenthesisKind):
-        if self.output_to_stderr and self.append:
+        if self.redirect_stderr and self.append:
             op = '2>>'
-        elif self.output_to_stderr:
+        elif self.redirect_stderr:
             op = '2>'
         elif self.append:
             op = '>>'
