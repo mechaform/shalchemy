@@ -1,47 +1,20 @@
-from typing import Any, Callable, List, Union
+from typing import Any, cast, IO, List, Optional, OrderedDict, Sequence, Union
 
-from enum import Enum
 import io
-import os
-import sys
 import shlex
-import tempfile
 import textwrap
 import subprocess
 
-from .arguments import compile_arguments
+from .arguments import UncompiledArgument, compile_arguments
 from .run_result import RunResult, ReadSubstitutePreparation, WriteSubstitutePreparation
-
-
-class ParenthesisKind(Enum):
-    NEVER = 1
-    ALWAYS = 2
-    COMPOUND_ONLY = 3
-
-
-ShalchemyArgument = Union[
-    str,
-    'ShalchemyExpression',
-    'ReadSubstitute',
-    'WriteSubstitute',
-]
-
-ShalchemyExpression = Union[
-    'CommandExpression',
-    'PipeExpression',
-    'RedirectInExpression',
-    'RedirectOutExpression',
-]
-
-ShalchemyFile = Union[
-    str,
-    io.IOBase,
-]
-
-ShalchemyOutputStream = Union[
-    io.IOBase,
-    int,
-]
+from .types import (
+    ParenthesisKind,
+    PublicArgument,
+    ShalchemyFile,
+    PublicKeywordArgument,
+    KeywordArgumentRenderer,
+    ShalchemyOutputStream,
+)
 
 
 def is_shalchemy_expression(object: Any) -> bool:
@@ -65,15 +38,15 @@ def is_shalchemy_file(object: Any) -> bool:
 
 
 def represent_file(file: Union[str, io.IOBase]):
-    if isinstance(file, io.TextIOWrapper):
-        return f'File({repr(file.name)})'
-    elif isinstance(file, str):
+    if isinstance(file, str):
         return shlex.quote(file)
+    elif isinstance(file, io.IOBase) and getattr(file, 'name', None):
+        return f'File({getattr(file, "name")})'
     else:
         return repr(file)
 
 
-class ShalchemyBase:
+class ShalchemyExpression:
     @property
     def read_sub(self) -> 'ReadSubstitute':
         return ReadSubstitute(self)
@@ -81,14 +54,6 @@ class ShalchemyBase:
     @property
     def write_sub(self) -> 'WriteSubstitute':
         return WriteSubstitute(self)
-
-    def stderr(self, destination: ShalchemyFile, append=False):
-        return RedirectOutExpression(
-            self,
-            destination,
-            append=append,
-            stderr=True,
-        )
 
     def __or__(self, rhs):
         return PipeExpression(self, rhs)
@@ -102,8 +67,16 @@ class ShalchemyBase:
     def in_(self, rhs):
         return RedirectInExpression(self, rhs)
 
-    def out(self, rhs):
+    def out_(self, rhs):
         return RedirectOutExpression(self, rhs)
+
+    def err_(self, destination: ShalchemyFile, append=False):
+        return RedirectOutExpression(
+            self,
+            destination,
+            append=append,
+            stderr=True,
+        )
 
     def __bool__(self):
         from .runner import _internal_run
@@ -126,9 +99,9 @@ class ShalchemyBase:
 
     def _run(
         self,
-        stdin: io.IOBase,
-        stdout: ShalchemyOutputStream,
-        stderr: ShalchemyOutputStream,
+        stdin: Optional[ShalchemyOutputStream],
+        stdout: Optional[ShalchemyOutputStream],
+        stderr: Optional[ShalchemyOutputStream],
     ) -> RunResult:
         raise NotImplementedError()
 
@@ -136,36 +109,38 @@ class ShalchemyBase:
         raise NotImplementedError()
 
 
-class CommandExpression(ShalchemyBase):
-    _args: List[ShalchemyArgument]
-    _kwarg_convert: Callable[[str, ShalchemyArgument], str]
+class CommandExpression(ShalchemyExpression):
+    _args: Sequence[Union[str, UncompiledArgument]]
+    _kwarg_render: KeywordArgumentRenderer
 
     def __init__(
         self,
-        *args: List[ShalchemyArgument],
-        **kwargs: Any,
+        *args: Union[str, UncompiledArgument],
+        _kwarg_render: KeywordArgumentRenderer = None
     ):
         self._args = args
-        self._kwarg_convert = kwargs.pop('_kwarg_convert')
+        # Bypass mypy complaints about "assigning to a method"
+        setattr(self, '_kwarg_render', _kwarg_render)
 
-    def __call__(self, *args, **kwargs):
+
+    def __call__(self, *args: PublicArgument, **kwargs: PublicKeywordArgument):
         if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], str):
             return CommandExpression(
                 *self._args,
                 *shlex.split(args[0]),
-                _kwarg_convert=self._kwarg_convert,
+                _kwarg_render=getattr(self, '_kwarg_render'),
             )
 
         compiled = compile_arguments(
             args,
             kwargs,
-            _kwarg_convert=self._kwarg_convert,
+            _kwarg_render=getattr(self, '_kwarg_render'),
         )
 
         return CommandExpression(
             *self._args,
             *compiled,
-            _kwarg_convert=self._kwarg_convert,
+            _kwarg_render=getattr(self, '_kwarg_render'),
         )
 
     def __getattr__(self, attr):
@@ -175,15 +150,15 @@ class CommandExpression(ShalchemyBase):
 
     def _run(
         self,
-        stdin: io.IOBase,
-        stdout: ShalchemyOutputStream,
-        stderr: ShalchemyOutputStream,
+        stdin: Optional[ShalchemyOutputStream],
+        stdout: Optional[ShalchemyOutputStream],
+        stderr: Optional[ShalchemyOutputStream],
     ) -> RunResult:
-        opened_processes = []
-        opened_files = []
-        opened_directories = []
-        prepared_args = []
-        arguments = []
+        opened_processes: List[subprocess.Popen] = []
+        opened_files: List[ShalchemyOutputStream] = []
+        opened_directories: List[str] = []
+        prepared_args: List[Union[WriteSubstitutePreparation, ReadSubstitutePreparation]] = []
+        arguments: List[str] = []
 
         for arg in self._args:
             if isinstance(arg, (ReadSubstitute, WriteSubstitute)):
@@ -194,14 +169,18 @@ class CommandExpression(ShalchemyBase):
                 )
                 prepared_args.append(preparation)
                 arguments.append(preparation.filename)
+            elif isinstance(arg, UncompiledArgument):
+                result = arg.compile()
+                arguments.extend(result.args)
+                prepared_args.extend(result.prepared_args)
             else:
                 arguments.append(arg)
 
         process = subprocess.Popen(
             arguments,
-            stdin=stdin,
-            stdout=stdout,
-            stderr=stderr,
+            stdin=cast(Union[IO, int, None], stdin),
+            stdout=cast(Union[IO, int, None], stdout),
+            stderr=cast(Union[IO, int, None], stderr),
         )
 
         for preparation in prepared_args:
@@ -230,7 +209,7 @@ class CommandExpression(ShalchemyBase):
         return f'$({self._repr(ParenthesisKind.NEVER)})'
 
 
-class PipeExpression(ShalchemyBase):
+class PipeExpression(ShalchemyExpression):
     lhs: ShalchemyExpression
     rhs: ShalchemyExpression
 
@@ -244,9 +223,9 @@ class PipeExpression(ShalchemyBase):
 
     def _run(
         self,
-        stdin: io.IOBase,
-        stdout: ShalchemyOutputStream,
-        stderr: ShalchemyOutputStream,
+        stdin: Optional[ShalchemyOutputStream],
+        stdout: Optional[ShalchemyOutputStream],
+        stderr: Optional[ShalchemyOutputStream],
     ) -> RunResult:
         context_lhs = self.lhs._run(
             stdin=stdin,
@@ -254,7 +233,7 @@ class PipeExpression(ShalchemyBase):
             stderr=stderr,
         )
         context_rhs = self.rhs._run(
-            stdin=context_lhs.main.stdout,
+            stdin=cast(io.IOBase, context_lhs.main.stdout),
             stdout=stdout,
             stderr=stderr,
         )
@@ -277,7 +256,7 @@ class PipeExpression(ShalchemyBase):
         return f'$({self._repr(ParenthesisKind.NEVER)})'
 
 
-class RedirectInExpression(ShalchemyBase):
+class RedirectInExpression(ShalchemyExpression):
     lhs: ShalchemyExpression
     rhs: ShalchemyFile
 
@@ -287,16 +266,17 @@ class RedirectInExpression(ShalchemyBase):
 
     def _run(
         self,
-        stdin: io.IOBase,
-        stdout: ShalchemyOutputStream,
-        stderr: ShalchemyOutputStream,
+        stdin: Optional[ShalchemyOutputStream],
+        stdout: Optional[ShalchemyOutputStream],
+        stderr: Optional[ShalchemyOutputStream],
     ) -> RunResult:
         opened_files = []
-        if isinstance(self.rhs, io.IOBase):
-            actual_stdin = self.rhs
-        else:
-            actual_stdin = open(self.rhs, 'r')
+        actual_stdin: io.IOBase
+        if isinstance(self.rhs, str):
+            actual_stdin = cast(io.IOBase, open(self.rhs, 'r'))
             opened_files.append(actual_stdin)
+        else:
+            actual_stdin = self.rhs
 
         context_lhs = self.lhs._run(
             stdin=actual_stdin,
@@ -317,10 +297,10 @@ class RedirectInExpression(ShalchemyBase):
         return f'$({self._repr(ParenthesisKind.NEVER)})'
 
 
-class RedirectOutExpression(ShalchemyBase):
+class RedirectOutExpression(ShalchemyExpression):
     lhs: ShalchemyExpression
     rhs: ShalchemyFile
-    stderr: bool
+    output_to_stderr: bool
     append: bool
     _parents: List[ShalchemyExpression]
     _process: subprocess.Popen
@@ -330,35 +310,37 @@ class RedirectOutExpression(ShalchemyBase):
         self.lhs = lhs
         self.rhs = rhs
         self.append = append
-        self.stderr = stderr
+        self.output_to_stderr = stderr
         self._parents = []
 
     def _run(
         self,
-        stdin: io.IOBase,
-        stdout: ShalchemyOutputStream,
-        stderr: ShalchemyOutputStream,
+        stdin: Optional[ShalchemyOutputStream],
+        stdout: Optional[ShalchemyOutputStream],
+        stderr: Optional[ShalchemyOutputStream],
     ) -> RunResult:
         opened_files = []
-        if self.stderr:
+        actual_stdout: Optional[ShalchemyOutputStream]
+        actual_stderr: Optional[ShalchemyOutputStream]
+        if self.output_to_stderr:
             actual_stdout = stdout
             if isinstance(self.rhs, io.IOBase):
                 actual_stderr = self.rhs
             elif self.append:
-                actual_stderr = open(self.rhs, 'a')
+                actual_stderr = cast(io.IOBase, open(self.rhs, 'a'))
                 opened_files.append(actual_stderr)
             else:
-                actual_stderr = open(self.rhs, 'w')
+                actual_stderr = cast(io.IOBase, open(self.rhs, 'w'))
                 opened_files.append(actual_stderr)
         else:
             actual_stderr = stderr
             if isinstance(self.rhs, io.IOBase):
                 actual_stdout = self.rhs
             elif self.append:
-                actual_stdout = open(self.rhs, 'a')
+                actual_stdout = cast(io.IOBase, open(self.rhs, 'a'))
                 opened_files.append(actual_stdout)
             else:
-                actual_stdout = open(self.rhs, 'w')
+                actual_stdout = cast(io.IOBase, open(self.rhs, 'w'))
                 opened_files.append(actual_stdout)
 
         context_lhs = self.lhs._run(
@@ -374,9 +356,9 @@ class RedirectOutExpression(ShalchemyBase):
         )
 
     def _repr(self, paren: ParenthesisKind):
-        if self.stderr and self.append:
+        if self.output_to_stderr and self.append:
             op = '2>>'
-        elif self.stderr:
+        elif self.output_to_stderr:
             op = '2>'
         elif self.append:
             op = '>>'
@@ -430,10 +412,10 @@ class ReadSubstitute(ProcessSubstituteExpression):
 
     def _prepare(
         self,
-        stdin: io.IOBase,
-        stdout: ShalchemyOutputStream,
-        stderr: ShalchemyOutputStream,
-    ) -> RunResult:
+        stdin: Optional[ShalchemyOutputStream],
+        stdout: Optional[ShalchemyOutputStream],
+        stderr: Optional[ShalchemyOutputStream],
+    ) -> ReadSubstitutePreparation:
         return ReadSubstitutePreparation(
             self.expression,
             stdin,
@@ -493,9 +475,9 @@ class WriteSubstitute:
 
     def _prepare(
         self,
-        stdin: io.IOBase,
-        stdout: ShalchemyOutputStream,
-        stderr: ShalchemyOutputStream,
+        stdin: Optional[ShalchemyOutputStream],
+        stdout: Optional[ShalchemyOutputStream],
+        stderr: Optional[ShalchemyOutputStream],
     ) -> WriteSubstitutePreparation:
         return WriteSubstitutePreparation(
             self.expression,

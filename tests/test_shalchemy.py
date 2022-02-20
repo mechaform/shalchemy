@@ -1,6 +1,8 @@
 # Note that you need the -s flag on pytest when you run these tests otherwise
 # some of the tests will fail (i.e. `pytest -s`)
+from typing import cast
 
+import io
 import os
 import tempfile
 import textwrap
@@ -13,7 +15,7 @@ from shalchemy import sh, bin
 from shalchemy.bin import cat, diff, find, grep, wc
 import shalchemy.runner
 
-FAKE_STDIN = tempfile.TemporaryFile()
+FAKE_STDIN = cast(io.IOBase, tempfile.TemporaryFile())
 shalchemy.runner._DEFAULT_STDIN = FAKE_STDIN
 
 os.chdir(os.path.dirname(__file__))
@@ -108,12 +110,12 @@ class TestShalchemy(unittest.TestCase):
         some_output = tempfile.TemporaryFile('w+')
         some_input.write('hello world')
         some_input.seek(0)
-        sha.run(sh('tr [a-z] [A-Z]').in_(some_input).out(some_output))
+        sha.run(sh('tr [a-z] [A-Z]').in_(some_input).out_(some_output))
         some_output.seek(0)
-        result = some_output.read()
+        output_text = some_output.read()
         some_input.close()
         some_output.close()
-        self.assertEqual(result, 'HELLO WORLD')
+        self.assertEqual(output_text, 'HELLO WORLD')
 
     def test_iter(self):
         result = []

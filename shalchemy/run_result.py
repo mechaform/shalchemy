@@ -1,5 +1,5 @@
 from cmath import exp
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING, cast, List, Optional, Sequence
 
 import io
 import os
@@ -12,16 +12,16 @@ if TYPE_CHECKING:
 
 class RunResult:
     main: subprocess.Popen
-    file: Union[io.TextIOWrapper, int]
+    file: 'ShalchemyOutputStream'
     processes: List[subprocess.Popen]
-    files: List[Union[io.IOBase, int]]
+    files: Sequence['ShalchemyOutputStream']
     directories: List[str]
 
     def __init__(
         self,
         main: subprocess.Popen,
         processes: Optional[List[subprocess.Popen]] = None,
-        files: Optional[List[io.IOBase]] = None,
+        files: Optional[List['ShalchemyOutputStream']] = None,
         directories: Optional[List[str]] = None,
     ):
         if isinstance(main, subprocess.Popen):
@@ -50,20 +50,20 @@ class RunResult:
 class ReadSubstitutePreparation:
     tmpdir: str
     filename: str
-    writer: int
+    writer: io.IOBase
     context: RunResult
 
     def __init__(
         self,
         expression: 'ShalchemyExpression',
-        stdin: io.IOBase,
-        stdout: 'ShalchemyOutputStream',
-        stderr: 'ShalchemyOutputStream',
+        stdin: Optional['ShalchemyOutputStream'],
+        stdout: Optional['ShalchemyOutputStream'],
+        stderr: Optional['ShalchemyOutputStream'],
     ):
         # Create a temporary directory so we can get a file called /tmp/tmpXXXXXX/fifo
         self.tmpdir = tempfile.mkdtemp()
         self.filename = os.path.join(self.tmpdir, 'fifo')
-        self.writer = open(self.filename, 'w')
+        self.writer = cast(io.IOBase, open(self.filename, 'w'))
         self.context = expression._run(
             stdin=stdin,
             stdout=self.writer,
@@ -81,18 +81,18 @@ class ReadSubstitutePreparation:
 
 class WriteSubstitutePreparation:
     expression: 'ShalchemyExpression'
-    stdin: io.IOBase
-    stdout: 'ShalchemyOutputStream'
-    stderr: 'ShalchemyOutputStream'
+    stdin: Optional['ShalchemyOutputStream']
+    stdout: Optional['ShalchemyOutputStream']
+    stderr: Optional['ShalchemyOutputStream']
     tmpdir: str
     filename: str
 
     def __init__(
         self,
         expression: 'ShalchemyExpression',
-        stdin: io.IOBase,
-        stdout: 'ShalchemyOutputStream',
-        stderr: 'ShalchemyOutputStream',
+        stdin: Optional['ShalchemyOutputStream'],
+        stdout: Optional['ShalchemyOutputStream'],
+        stderr: Optional['ShalchemyOutputStream'],
     ):
         self.expression = expression
         self.stdin = stdin

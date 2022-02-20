@@ -1,38 +1,37 @@
-from typing import List, Optional
+from typing import cast, Optional
 
 import io
 import sys
 import shlex
-from .expressions import CommandExpression, ShalchemyExpression
-from .arguments import compile_arguments, default_convert
+from .expressions import CommandExpression, ShalchemyExpression, ShalchemyFile
+from .arguments import compile_arguments, default_kwarg_render
 from .run_result import RunResult
 
 
 # This stuff is hacks for pytest
-_DEFAULT_STDIN = sys.stdin
-_DEFAULT_STDOUT = sys.stdout
-_DEFAULT_STDERR = sys.stderr
+_DEFAULT_STDIN: io.IOBase = cast(io.IOBase, sys.stdin)
+_DEFAULT_STDOUT: io.IOBase = cast(io.IOBase, sys.stdout)
+_DEFAULT_STDERR: io.IOBase = cast(io.IOBase, sys.stderr)
 
 
 class CommandCreator:
     def __call__(self, *args, **kwargs) -> CommandExpression:
-        _kwarg_convert = kwargs.pop('_kwarg_convert',  default_convert)
+        _kwarg_render = kwargs.pop('_kwarg_render',  default_kwarg_render)
         if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], str):
             return CommandExpression(
                 *shlex.split(args[0]),
-                _kwarg_convert=_kwarg_convert,
+                _kwarg_render=_kwarg_render,
             )
 
         compiled = compile_arguments(
             args,
             kwargs,
-            _kwarg_convert=_kwarg_convert,
+            _kwarg_render=_kwarg_render,
         )
 
         return CommandExpression(
             *compiled,
-            _kwarg_convert=_kwarg_convert,
-            **kwargs,
+            _kwarg_render=_kwarg_render,
         )
 
     def run(
@@ -50,6 +49,11 @@ class CommandCreator:
         )
         result.wait()
         return result.main.returncode
+
+
+class ShellFile:
+    def __init__(self, source: ShalchemyFile):
+        pass
 
 
 def _internal_run(

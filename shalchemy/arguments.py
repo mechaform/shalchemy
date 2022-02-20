@@ -1,16 +1,27 @@
-from typing import Any, List, Dict, Callable, TYPE_CHECKING
-
-import shlex
+from dataclasses import dataclass
+import io
+from typing import Any, cast, List, Dict, Sequence, Union, TYPE_CHECKING
+from .types import ParenthesisKind, PublicArgument, PublicKeywordArgument
+from .run_result import ReadSubstitutePreparation, WriteSubstitutePreparation
+import sys
 
 if TYPE_CHECKING:
-    from .expressions import ShalchemyArgument
+    from .expressions import ReadSubstitute, WriteSubstitute
 
 
-def default_convert(keyword: str, value: str) -> str:
-    return f"--{keyword.replace('_', '-')}={shlex.quote(value)}"
+from shalchemy.types import (
+    InternalArgument,
+    KeywordArgumentRenderer,
+)
 
 
-def flatten(stuff: List[Any]):
+def default_kwarg_render(keyword: str, value: PublicKeywordArgument) -> Sequence[str]:
+    if isinstance(value, bool):
+        return [f"--{keyword.replace('_', '-')}"]
+    return [f"--{keyword.replace('_', '-')}={value}"]
+
+
+def flatten(stuff: Sequence[Any]):
     if not isinstance(stuff, (list, tuple)):
         return stuff
     flattened = []
@@ -23,13 +34,69 @@ def flatten(stuff: List[Any]):
 
 
 def compile_arguments(
-    args: List['ShalchemyArgument'],
-    kwargs: Dict[str, 'ShalchemyArgument'],
-    _kwarg_convert: Callable[[str, 'ShalchemyArgument'], str] = default_convert
-) -> List[Any]:
-    result = []
+    args: Sequence['PublicArgument'],
+    kwargs: Dict[str, PublicKeywordArgument],
+    _kwarg_render: KeywordArgumentRenderer = default_kwarg_render
+) -> List[InternalArgument]:
+    from .expressions import ReadSubstitute, WriteSubstitute
+    result: List[InternalArgument] = []
     for arg in flatten(args):
         result.append(arg)
     for key, value in kwargs.items():
-        result.append(_kwarg_convert(key, value))
+        if isinstance(value, (str, int, float, bool)):
+            result.extend(_kwarg_render(key, value))
+        elif isinstance(value, (ReadSubstitute, WriteSubstitute)):
+            result.append(UncompiledArgument(key, value, _kwarg_render))
+        else:
+            raise TypeError(
+                'Keyword arguments must be one of [str, int, float, bool, ReadSubstitute, WriteSubstitute]',
+                value
+            )
     return result
+
+
+@dataclass
+class ArgumentCompilationResult:
+    args: Sequence[str]
+    prepared_args: List[Union[WriteSubstitutePreparation, ReadSubstitutePreparation]]
+
+
+UncompiledKeywordArgument = Union[
+    'ReadSubstitute',
+    'WriteSubstitute',
+]
+
+class UncompiledArgument:
+    key: str
+    value: UncompiledKeywordArgument
+    render: KeywordArgumentRenderer
+
+    def __init__(self, key: str, value: UncompiledKeywordArgument, render: KeywordArgumentRenderer):
+        self.key = key
+        self.value = value
+        setattr(self, 'render', render)
+
+    def compile(self) -> ArgumentCompilationResult:
+        prepared_args: List[Union[WriteSubstitutePreparation, ReadSubstitutePreparation]] = []
+
+        # Avoid mypy typing self.render as a bound method
+        render: KeywordArgumentRenderer = getattr(self, 'render')
+        if isinstance(self.value, (ReadSubstitute, WriteSubstitute)):
+            preparation = self.value._prepare(
+                stdin=cast(io.IOBase, sys.stdin),
+                stdout=cast(io.IOBase, sys.stdout),
+                stderr=cast(io.IOBase, sys.stderr),
+            )
+            prepared_args.append(preparation)
+            args = render(self.key, preparation.filename)
+        else:
+            args = render(self.key, self.value)
+        return ArgumentCompilationResult(args=args, prepared_args=prepared_args)
+
+    def _repr(self, paren: ParenthesisKind = None):
+        render: KeywordArgumentRenderer = getattr(self, 'render')
+        fname = f'{self.value._repr(ParenthesisKind.ALWAYS)}'
+        return render(self.key, fname)
+
+    def __repr__(self):
+        return self._repr
