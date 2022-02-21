@@ -1,4 +1,7 @@
-/shalchemy/test/garbage/
-shalchemy.egg-info/
 *.pyc
+shalchemy.egg-info/
 /dist/*
+/build/*
+.coverage
+
+/shalchemy/test/garbage/
