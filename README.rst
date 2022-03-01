@@ -5,6 +5,7 @@ Conveniently call upon binaries from Python as if you were in sh.
 
 
 .. code:: python
+
     from shalchemy import sh, run
     from shalchemy.bin import cat, curl, grep
  
@@ -122,6 +123,7 @@ file you have on disk with something on the internet. Normally, you
 would do:
 
 .. code:: sh
+
     curl example.com/file.txt > tempfile.txt
     diff file.txt tempfile.txt
     rm tempfile.txt
@@ -138,6 +140,7 @@ is called Process Substitution.
 The way you do the same with shalchemy is:
 
 .. code:: python
+
     diff('file.txt', curl('example.com/file.txt').read_sub())
 
 Once an expression's `read_sub` method is called, the result is a
@@ -155,6 +158,7 @@ other commands.
 There is also a ``write_sub`` equivalent to sh's ``>(expr)``.
 
 .. code:: python
+
     sh.run(
         cat('/usr/share/dict/words') |
         bin.tee(
