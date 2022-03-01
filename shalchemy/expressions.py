@@ -100,12 +100,15 @@ class ShalchemyExpression:
     def __int__(self):
         return int(str(self))
 
-    def __str__(self):
+    def __bytes__(self):
         from .runner import _internal_run
         result = _internal_run(self, stdout=subprocess.PIPE)
-        answer = result.main.stdout.read().decode()
+        answer = result.main.stdout.read()
         result.wait()
         return answer
+
+    def __str__(self):
+        return bytes(self).decode()
 
     def __iter__(self):
         return str(self).rstrip('\n').split('\n').__iter__()
@@ -296,7 +299,7 @@ class RedirectInExpression(ShalchemyExpression):
 
     def _make_os_file(self, file: ShalchemyFile) -> FileResult:
         if isinstance(file, str):
-            osfile = cast(io.IOBase, open(file, 'r'))
+            osfile = cast(io.IOBase, open(file, 'rb'))
             return FileResult(fileno=osfile.fileno(), open_files=[osfile])
 
         try:
@@ -367,7 +370,7 @@ class RedirectOutExpression(ShalchemyExpression):
                 return FileResult(fileno=subprocess.STDOUT, open_files=[])
             elif file == '&2':
                 raise ValueError('Redirects to stderr (&2) is unsupported')
-            mode = 'a' if append else 'w'
+            mode = 'ab' if append else 'wb'
             osfile = open(file, mode)
             return FileResult(fileno=osfile.fileno(), open_files=[cast(io.IOBase, osfile)])
 

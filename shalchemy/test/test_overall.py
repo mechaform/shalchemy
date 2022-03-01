@@ -25,6 +25,7 @@ class TestOverall(TestCase):
         self.assertEqual(self.read_stderr(), '')
 
         self.assertEqual(str(grep('apple') < './fixtures/shuffled_words.txt').rstrip(), 'apple')
+        self.assertEqual(bytes(grep('apple') < './fixtures/shuffled_words.txt').rstrip(), b'apple')
         self.assertEqual(int(grep('apple') | sh('wc -c') < './fixtures/shuffled_words.txt'), 6)
         self.assertEqual(self.read_stdout(), '')
         self.assertEqual(self.read_stderr(), '')

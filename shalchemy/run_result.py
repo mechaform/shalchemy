@@ -105,7 +105,7 @@ class ReadSubstitutePreparation:
         # Create a temporary directory so we can get a file called /tmp/tmpXXXXXX/fifo
         self.tmpdir = tempfile.mkdtemp()
         self.filename = os.path.join(self.tmpdir, 'fifo')
-        self.writer = cast(io.IOBase, open(self.filename, 'w'))
+        self.writer = cast(io.IOBase, open(self.filename, 'wb'))
         self.context = expression._run(
             stdin=stdin,
             stdout=self.writer,
@@ -148,7 +148,7 @@ class WriteSubstitutePreparation:
         os.mkfifo(self.filename, 0o600)
 
     def _run(self) -> RunResult:
-        reader = cast(io.IOBase, open(self.filename, 'r'))
+        reader = cast(io.IOBase, open(self.filename, 'rb'))
         opened_directories = [self.tmpdir]
         opened_files = [reader]
         context = self.expression._run(
