@@ -54,11 +54,9 @@ def represent_file(file: Union[str, io.IOBase]):
 
 
 class ShalchemyExpression:
-    @property
     def read_sub(self) -> 'ReadSubstitute':
         return ReadSubstitute(self)
 
-    @property
     def write_sub(self) -> 'WriteSubstitute':
         return WriteSubstitute(self)
 
@@ -473,7 +471,7 @@ class ReadSubstitute(ProcessSubstituteExpression):
             is called Process Substitution.
 
             The way you do the same with shalchemy is:
-            diff('file.txt', curl('example.com/file.txt').read_sub)
+            diff('file.txt', curl('example.com/file.txt').read_sub())
 
             Once an expression's `read_sub` method is called, the result is a
             ProcessSubstituteExpression which can no longer be composed with

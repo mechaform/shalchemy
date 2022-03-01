@@ -71,7 +71,6 @@ class TestArguments(TestCase):
             '--happy',
             '--count=5',
         ])
-        print(parsed)
 
     def test_quirky_render(self):
         quirky_probe = bin.shalchemyprobe.args(_kwarg_render=quirky_render)
